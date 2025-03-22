@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required
 import mysql.connector
+from werkzeug.security import generate_password_hash, check_password_hash  # For password hashing
 
 app = Flask(__name__)
 
@@ -25,13 +26,16 @@ def create_identification():
         return jsonify({"error": "Missing JSON in request"}), 400
 
     data = request.get_json()
+    # Hash the password before storing it
+    hashed_password = generate_password_hash(data['password'])
+
     cursor = db.cursor()
     try:
         cursor.execute("""INSERT INTO identifications(
-           firstname, lastname, gender, status, country, city, telephone) 
-           VALUES(%s, %s, %s, %s, %s, %s, %s)""", 
+           firstname, lastname, gender, status, country, city, telephone, password) 
+           VALUES(%s, %s, %s, %s, %s, %s, %s, %s)""", 
            (data['firstname'], data['lastname'], data['gender'], data['status'], 
-            data['country'], data['city'], data['telephone']
+            data['country'], data['city'], data['telephone'], hashed_password
             ))
         db.commit()
         cursor.close()
@@ -96,17 +100,28 @@ def update_identification(identification_id):
         return jsonify({"error": "Missing JSON in request"}), 400
 
     data = request.get_json()
+
+    # Check if password is provided, then hash it
+    if 'password' in data:
+        hashed_password = generate_password_hash(data['password'])
+    else:
+        hashed_password = None  # Keep the existing password if not updated
+
     cursor = db.cursor()
     try:
-        cursor.execute("""
-          UPDATE identifications 
+        # Update the identification record, include password update if provided
+        cursor.execute("""UPDATE identifications 
           SET firstname=%s, lastname=%s, gender=%s, status=%s, country=%s, city=%s, telephone=%s 
-          WHERE id=%s
-          """, 
+          WHERE id=%s""", 
              (
                 data['firstname'], data['lastname'], data['gender'], data['status'],
                 data['country'], data['city'], data['telephone'], identification_id
             ))
+
+        # Only update password if it's provided
+        if hashed_password:
+            cursor.execute("""UPDATE identifications SET password=%s WHERE id=%s""", (hashed_password, identification_id))
+        
         db.commit()
         cursor.close()
         return jsonify({'message': 'Identification updated successfully'})
@@ -128,7 +143,7 @@ def delete_identification(identification_id):
         return jsonify({'error': str(e)}), 500
 
 
-# Endpoint of user login
+# Endpoint of user login 
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
